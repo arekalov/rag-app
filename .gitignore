@@ -1,0 +1,28 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.vscode/
+
+# macOS
+.DS_Store
+
+# Data directory
+data/
+*.db
+*.db-journal
+
+# Logs
+logs/
+*.log
+
+# Temp files
+tmp/
+temp/
