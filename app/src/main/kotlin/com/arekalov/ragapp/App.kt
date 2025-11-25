@@ -173,7 +173,7 @@ fun handleStats(pipeline: IndexingPipeline) {
 fun printUsage() {
     println()
     println("╔═══════════════════════════════════════════════════════════════╗")
-    println("║              RAG App - Document Indexing System              ║")
+    println("║              RAG App - Document Indexing System               ║")
     println("╚═══════════════════════════════════════════════════════════════╝")
     println()
     println("Использование:")
