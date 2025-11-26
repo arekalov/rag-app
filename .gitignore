@@ -26,3 +26,7 @@ logs/
 # Temp files
 tmp/
 temp/
+
+src/main/resources/application.conf
+java_pid616.hprof
+app/data

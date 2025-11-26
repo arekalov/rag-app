@@ -33,35 +33,65 @@ class EmbeddingService(
     /**
      * Генерация эмбеддинга для текста
      */
-    suspend fun generateEmbedding(text: String): List<Float> {
+    suspend fun generateEmbedding(text: String, retries: Int = 3): List<Float> {
         if (text.isBlank()) {
             logger.warn { "Попытка генерации эмбеддинга для пустого текста" }
             return emptyList()
         }
         
-        try {
-            val response = client.post("$ollamaUrl/api/embeddings") {
-                contentType(ContentType.Application.Json)
-                setBody(
-                    OllamaEmbeddingRequest(
-                        model = model,
-                        prompt = text
-                    )
-                )
-            }
-            
-            if (response.status == HttpStatusCode.OK) {
-                val embeddingResponse = response.body<OllamaEmbeddingResponse>()
-                logger.debug { "Получен эмбеддинг размерности ${embeddingResponse.embedding.size}" }
-                return embeddingResponse.embedding
-            } else {
-                logger.error { "Ошибка при получении эмбеддинга: ${response.status}" }
-                throw Exception("Не удалось получить эмбеддинг: ${response.status}")
-            }
-        } catch (e: Exception) {
-            logger.error(e) { "Ошибка при запросе к Ollama API" }
-            throw e
+        // Ограничение длины текста (Ollama может не справиться с очень длинными текстами)
+        val maxLength = 8000
+        val truncatedText = if (text.length > maxLength) {
+            logger.warn { "Текст обрезан с ${text.length} до $maxLength символов" }
+            text.take(maxLength)
+        } else {
+            text
         }
+        
+        var lastException: Exception? = null
+        
+        repeat(retries) { attempt ->
+            try {
+                val response = client.post("$ollamaUrl/api/embeddings") {
+                    contentType(ContentType.Application.Json)
+                    setBody(
+                        OllamaEmbeddingRequest(
+                            model = model,
+                            prompt = truncatedText
+                        )
+                    )
+                }
+                
+                if (response.status == HttpStatusCode.OK) {
+                    val embeddingResponse = response.body<OllamaEmbeddingResponse>()
+                    logger.debug { "Получен эмбеддинг размерности ${embeddingResponse.embedding.size}" }
+                    return embeddingResponse.embedding
+                } else {
+                    val errorMsg = "Ошибка при получении эмбеддинга: ${response.status}"
+                    logger.error { errorMsg }
+                    lastException = Exception(errorMsg)
+                    
+                    // Задержка перед повторной попыткой
+                    if (attempt < retries - 1) {
+                        val delayMs = (attempt + 1) * 1000L
+                        logger.warn { "Повторная попытка ${attempt + 1}/$retries через ${delayMs}мс..." }
+                        kotlinx.coroutines.delay(delayMs)
+                    }
+                }
+            } catch (e: Exception) {
+                logger.error(e) { "Ошибка при запросе к Ollama API (попытка ${attempt + 1}/$retries)" }
+                lastException = e
+                
+                // Задержка перед повторной попыткой
+                if (attempt < retries - 1) {
+                    val delayMs = (attempt + 1) * 1000L
+                    logger.warn { "Повторная попытка ${attempt + 1}/$retries через ${delayMs}мс..." }
+                    kotlinx.coroutines.delay(delayMs)
+                }
+            }
+        }
+        
+        throw lastException ?: Exception("Не удалось получить эмбеддинг после $retries попыток")
     }
     
     /**
@@ -74,7 +104,18 @@ class EmbeddingService(
             if (index > 0 && index % 10 == 0) {
                 logger.info { "Обработано $index/${texts.size} текстов" }
             }
-            generateEmbedding(text)
+            
+            // Небольшая задержка между запросами, чтобы не перегружать Ollama
+            if (index > 0) {
+                kotlinx.coroutines.delay(100)
+            }
+            
+            try {
+                generateEmbedding(text)
+            } catch (e: Exception) {
+                logger.error(e) { "Не удалось сгенерировать эмбеддинг для текста ${index + 1}/${texts.size}" }
+                throw e
+            }
         }
     }
     

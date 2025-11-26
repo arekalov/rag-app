@@ -8,7 +8,9 @@ data class Config(
     val chunkOverlap: Int,
     val ollamaUrl: String,
     val ollamaModel: String,
-    val databasePath: String
+    val databasePath: String,
+    val yandexApiKey: String,
+    val yandexFolderId: String
 ) {
     companion object {
         fun load(): Config {
@@ -19,7 +21,9 @@ data class Config(
                 chunkOverlap = config.getInt("ragapp.chunking.overlap"),
                 ollamaUrl = config.getString("ragapp.ollama.url"),
                 ollamaModel = config.getString("ragapp.ollama.model"),
-                databasePath = config.getString("ragapp.storage.database-path")
+                databasePath = config.getString("ragapp.storage.database-path"),
+                yandexApiKey = config.getString("ragapp.yandex.api-key"),
+                yandexFolderId = config.getString("ragapp.yandex.folder-id")
             )
         }
     }

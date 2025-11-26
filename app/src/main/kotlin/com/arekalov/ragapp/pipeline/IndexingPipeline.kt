@@ -56,66 +56,80 @@ class IndexingPipeline(private val config: Config) {
             
             var documentsProcessed = 0
             var chunksCreated = 0
+            var failedDocuments = 0
             
             // Обработка каждого документа
             for ((index, loadedDocument) in documents.withIndex()) {
-                logger.info { "Обработка документа ${index + 1}/${documents.size}: ${loadedDocument.metadata["fileName"]}" }
-                
-                // Проверяем, не проиндексирован ли уже документ
-                if (!forceReindex && vectorStore.documentExists(loadedDocument.path)) {
-                    logger.info { "Документ уже проиндексирован, пропускаем: ${loadedDocument.path}" }
-                    continue
-                }
-                
-                // Разбиение на чанки
-                val textChunks = textChunker.chunkByWords(loadedDocument.content)
-                logger.debug { "Создано ${textChunks.size} чанков" }
-                
-                if (textChunks.isEmpty()) {
-                    logger.warn { "Документ не содержит текста для индексации: ${loadedDocument.path}" }
-                    continue
-                }
-                
-                // Генерация эмбеддингов для всех чанков
-                val embeddings = withContext(Dispatchers.IO) {
-                    embeddingService.generateEmbeddings(textChunks.map { it.content })
-                }
-                
-                // Сохранение документа
-                val document = Document(
-                    id = loadedDocument.path,
-                    path = loadedDocument.path,
-                    indexedAt = System.currentTimeMillis()
-                )
-                vectorStore.saveDocument(document)
-                
-                // Сохранение чанков с эмбеддингами
-                textChunks.forEachIndexed { chunkIndex, textChunk ->
-                    val documentChunk = DocumentChunk(
-                        id = UUID.randomUUID().toString(),
-                        documentPath = loadedDocument.path,
-                        content = textChunk.content,
-                        embedding = embeddings[chunkIndex],
-                        chunkIndex = textChunk.index,
-                        metadata = loadedDocument.metadata
+                try {
+                    logger.info { "Обработка документа ${index + 1}/${documents.size}: ${loadedDocument.metadata["fileName"]}" }
+                    
+                    // Проверяем, не проиндексирован ли уже документ
+                    if (!forceReindex && vectorStore.documentExists(loadedDocument.path)) {
+                        logger.info { "Документ уже проиндексирован, пропускаем: ${loadedDocument.path}" }
+                        continue
+                    }
+                    
+                    // Разбиение на чанки
+                    val textChunks = textChunker.chunkByWords(loadedDocument.content)
+                    logger.debug { "Создано ${textChunks.size} чанков" }
+                    
+                    if (textChunks.isEmpty()) {
+                        logger.warn { "Документ не содержит текста для индексации: ${loadedDocument.path}" }
+                        continue
+                    }
+                    
+                    // Генерация эмбеддингов для всех чанков
+                    val embeddings = withContext(Dispatchers.IO) {
+                        embeddingService.generateEmbeddings(textChunks.map { it.content })
+                    }
+                    
+                    // Сохранение документа
+                    val document = Document(
+                        id = loadedDocument.path,
+                        path = loadedDocument.path,
+                        indexedAt = System.currentTimeMillis()
                     )
-                    vectorStore.saveChunk(documentChunk)
-                    chunksCreated++
+                    vectorStore.saveDocument(document)
+                    
+                    // Сохранение чанков с эмбеддингами
+                    textChunks.forEachIndexed { chunkIndex, textChunk ->
+                        val documentChunk = DocumentChunk(
+                            id = UUID.randomUUID().toString(),
+                            documentPath = loadedDocument.path,
+                            content = textChunk.content,
+                            embedding = embeddings[chunkIndex],
+                            chunkIndex = textChunk.index,
+                            metadata = loadedDocument.metadata
+                        )
+                        vectorStore.saveChunk(documentChunk)
+                        chunksCreated++
+                    }
+                    
+                    documentsProcessed++
+                    logger.info { "Документ обработан: ${loadedDocument.metadata["fileName"]} (${textChunks.size} чанков)" }
+                    
+                } catch (e: Exception) {
+                    failedDocuments++
+                    logger.error(e) { "Ошибка при обработке документа ${loadedDocument.metadata["fileName"]}: ${e.message}" }
+                    logger.warn { "Пропускаем проблемный документ и продолжаем индексацию..." }
+                    // Продолжаем обработку других документов
                 }
-                
-                documentsProcessed++
-                logger.info { "Документ обработан: ${loadedDocument.metadata["fileName"]} (${textChunks.size} чанков)" }
             }
             
             val duration = System.currentTimeMillis() - startTime
-            logger.info { "Индексация завершена: $documentsProcessed документов, $chunksCreated чанков за ${duration}мс" }
+            val message = if (failedDocuments > 0) {
+                "Индексация завершена: $documentsProcessed документов обработано, $chunksCreated чанков создано, $failedDocuments документов пропущено из-за ошибок (${duration}мс)"
+            } else {
+                "Индексация завершена: $documentsProcessed документов, $chunksCreated чанков за ${duration}мс"
+            }
+            logger.info { message }
             
             return IndexingResult(
                 success = true,
                 documentsProcessed = documentsProcessed,
                 chunksCreated = chunksCreated,
                 durationMs = duration,
-                error = null
+                error = if (failedDocuments > 0) "Пропущено $failedDocuments проблемных документов" else null
             )
             
         } catch (e: Exception) {
